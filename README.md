@@ -8,7 +8,6 @@
 1. Clone the repository:
    ```
    git clone <repository-url>
-   cd my-docker-project
    ```
 
 2. Build the Docker image:
@@ -29,9 +28,3 @@ To stop the application, use:
 ```
 docker-compose down
 ```
-
-Feel free to submit issues or pull requests for improvements or bug fixes.
-
-## License
-
-This project is licensed under the MIT License.
