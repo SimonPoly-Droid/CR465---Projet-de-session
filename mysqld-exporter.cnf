@@ -1,0 +1,4 @@
+[client]
+user=${MOODLE_DB_USER}
+password=${MOODLE_DB_PASSWORD}
+host=moodle-db

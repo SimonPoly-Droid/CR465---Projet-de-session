@@ -1,0 +1,321 @@
+services:
+  # ----------------------------------------
+  # Reverse Proxy & Service Discovery
+  # ----------------------------------------
+  traefik:
+    image: "traefik:v2.10"
+    container_name: "traefik"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--metrics.prometheus=true"
+    ports:
+      - "80:80"      # The HTTP port
+      - "8080:8080"  # The Web UI (Dashboard)
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks:
+      - platform-network
+
+  # ----------------------------------------
+  # Core University Services
+  # ----------------------------------------
+  drupal:
+    image: drupal:10-apache
+    container_name: drupal-crm
+    depends_on:
+      - drupal-db
+    environment:
+      - POSTGRES_DB=${DRUPAL_DB_NAME}
+      - POSTGRES_USER=${DRUPAL_DB_USER}
+      - POSTGRES_PASSWORD=${DRUPAL_DB_PASSWORD}
+      - POSTGRES_HOST=drupal-db
+    volumes:
+      - drupal_modules:/var/www/html/modules
+      - drupal_profiles:/var/www/html/profiles
+      - drupal_sites:/var/www/html/sites
+      - drupal_themes:/var/www/html/themes
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.drupal.rule=Host(`crm.university.local`, `portail.university.local`)"
+      - "traefik.http.routers.drupal.entrypoints=web"
+      - "traefik.http.services.drupal.loadbalancer.server.port=80"
+    networks:
+      - platform-network
+
+  drupal-db:
+    image: postgres:15-alpine
+    container_name: drupal-db
+    environment:
+      - POSTGRES_DB=${DRUPAL_DB_NAME}
+      - POSTGRES_USER=${DRUPAL_DB_USER}
+      - POSTGRES_PASSWORD=${DRUPAL_DB_PASSWORD}
+    volumes:
+      - drupal_db_data:/var/lib/postgresql/data
+    networks:
+      - platform-network
+
+  moodle:
+    image: ellakcy/moodle:mysql_maria_apache_405_php8.3
+    container_name: moodle-lms
+    depends_on:
+      - moodle-db
+    environment:
+      - MOODLE_URL=http://lms.university.local
+      - MOODLE_DB_HOST=moodle-db
+      - MOODLE_DB_NAME=${MOODLE_DB_NAME}
+      - MOODLE_DB_USER=${MOODLE_DB_USER}
+      - MOODLE_DB_PASSWORD=${MOODLE_DB_PASSWORD}
+    volumes:
+      - moodle_data:/var/www/html
+      - moodledata_data:/var/moodledata
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.moodle.rule=Host(`lms.university.local`)"
+      - "traefik.http.routers.moodle.entrypoints=web"
+      - "traefik.http.services.moodle.loadbalancer.server.port=80"
+    networks:
+      - platform-network
+
+  moodle-db:
+    image: mysql:8.0
+    expose:
+      - 3306    
+    container_name: moodle-db
+    environment:
+      - MYSQL_ONETIME_PASSWORD="yes"
+      - MYSQL_RANDOM_ROOT_PASSWORD="yes"
+      - MYSQL_USER=${MOODLE_DB_USER}
+      - MYSQL_PASSWORD=${MOODLE_DB_PASSWORD}
+      - MYSQL_DATABASE=${MOODLE_DB_NAME}
+    volumes:
+      - moodle_db_data:/var/lib/mysql
+    networks:
+      - platform-network
+
+  # ----------------------------------------
+  # Supporting Services
+  # ----------------------------------------
+  nextcloud:
+    image: nextcloud:latest
+    container_name: nextcloud-files
+    depends_on:
+      - nextcloud-db
+    environment:
+      - POSTGRES_HOST=nextcloud-db
+      - POSTGRES_DB=${NEXTCLOUD_DB_NAME}
+      - POSTGRES_USER=${NEXTCLOUD_DB_USER}
+      - POSTGRES_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+    volumes:
+      - nextcloud_data:/var/www/html
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nextcloud.rule=Host(`files.university.local`)"
+      - "traefik.http.routers.nextcloud.entrypoints=web"
+      - "traefik.http.services.nextcloud.loadbalancer.server.port=80"
+    networks:
+      - platform-network
+
+  nextcloud-db:
+    image: postgres:15-alpine
+    container_name: nextcloud-db
+    environment:
+      - POSTGRES_DB=${NEXTCLOUD_DB_NAME}
+      - POSTGRES_USER=${NEXTCLOUD_DB_USER}
+      - POSTGRES_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+    volumes:
+      - nextcloud_db_data:/var/lib/postgresql/data
+    networks:
+      - platform-network
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: keycloak-sso
+    command: start-dev
+    environment:
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN_USER}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+      - KC_DB=postgres
+      - KC_DB_URL_HOST=keycloak-db
+      - KC_DB_DATABASE=${KEYCLOAK_DB_NAME}
+      - KC_DB_USERNAME=${KEYCLOAK_DB_USER}
+      - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD}
+    depends_on:
+      - keycloak-db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.keycloak.rule=Host(`sso.university.local`)"
+      - "traefik.http.routers.keycloak.entrypoints=web"
+      - "traefik.http.services.keycloak.loadbalancer.server.port=8080"
+    networks:
+      - platform-network
+
+  keycloak-db:
+    image: postgres:15-alpine
+    container_name: keycloak-db
+    environment:
+      - POSTGRES_DB=${KEYCLOAK_DB_NAME}
+      - POSTGRES_USER=${KEYCLOAK_DB_USER}
+      - POSTGRES_PASSWORD=${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql/data
+    networks:
+      - platform-network
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-workflow
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=n8n-db
+      - DB_POSTGRESDB_DATABASE=${N8N_DB_NAME}
+      - DB_POSTGRESDB_USER=${N8N_DB_USER}
+      - DB_POSTGRESDB_PASSWORD=${N8N_DB_PASSWORD}
+      - N8N_SECURE_COOKIE=false
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`workflow.university.local`)"
+      - "traefik.http.routers.n8n.entrypoints=web"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+    networks:
+      - platform-network
+      
+  n8n-db:
+    image: postgres:15-alpine
+    container_name: n8n-db
+    environment:
+      - POSTGRES_DB=${N8N_DB_NAME}
+      - POSTGRES_USER=${N8N_DB_USER}
+      - POSTGRES_PASSWORD=${N8N_DB_PASSWORD}
+    volumes:
+      - n8n_db_data:/var/lib/postgresql/data
+    networks:
+      - platform-network
+
+  # ----------------------------------------
+  # Monitoring & Observability
+  # ----------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml # Requires a config file
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`monitoring.university.local`)"
+      - "traefik.http.routers.prometheus.entrypoints=web"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+    networks:
+      - platform-network
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cadvisor.rule=Host(`cadvisor.university.local`)"
+      - "traefik.http.routers.cadvisor.entrypoints=web"
+      - "traefik.http.services.cadvisor.loadbalancer.server.port=8080"
+    # -----------------------
+    networks:
+      - platform-network
+  mysqld-exporter:
+    image: prom/mysqld-exporter:latest
+    container_name: mysqld-exporter
+    environment:
+      - MOODLE_DB_USER=${MOODLE_DB_USER}
+      - MOODLE_DB_PASSWORD=${MOODLE_DB_PASSWORD}
+    volumes:
+      - ./mysqld-exporter.cnf:/etc/.my.cnf:ro
+    networks:
+      - platform-network
+    command:
+      - '--config.my-cnf=/etc/.my.cnf'
+    depends_on:
+      - moodle-db
+    restart: unless-stopped
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://grafana.university.local
+    depends_on:
+      - prometheus
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.university.local`)"
+      - "traefik.http.routers.grafana.entrypoints=web"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    networks:
+      - platform-network
+# ----------------------------------------
+# LABS ENVIRONMENT
+# ----------------------------------------
+  kasm:
+    image: linuxserver/kasm:latest
+    container_name: kasm-lab
+    restart: unless-stopped
+    privileged: true
+    shm_size: "1g"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Toronto
+      - KASM_PORT=443
+      - KASM_PUBLIC_URL=https://kasm.university.local
+    volumes:
+      - kasm_config:/config
+      - /dev/shm:/dev/shm
+    ports:
+      - "443:443"   # optional direct HTTPS for setup or fallback
+      - "3000:3000"  # initial setup wizard port if required
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kasm.rule=Host(`kasm.university.local`)"
+      - "traefik.http.routers.kasm.entrypoints=web"
+      - "traefik.http.services.kasm.loadbalancer.server.port=443"
+    networks:
+      - platform-network
+# ----------------------------------------
+# Networks & Volumes
+# ----------------------------------------
+networks:
+  platform-network:
+    driver: bridge
+
+volumes:
+  # Drupal
+  drupal_db_data:
+  drupal_modules:
+  drupal_profiles:
+  drupal_sites:
+  drupal_themes:
+  # Moodle
+  moodle_data:
+  moodledata_data:
+  moodle_db_data:
+  # Nextcloud
+  nextcloud_data:
+  nextcloud_db_data:
+  # Keycloak
+  keycloak_db_data:
+  # n8n
+  n8n_db_data:
+  # Grafana
+  grafana_data:
+  # Kasm
+  kasm_config:
