@@ -131,17 +131,21 @@ services:
       - platform-network
 
   keycloak:
-    image: quay.io/keycloak/keycloak:latest
+    image: quay.io/keycloak/keycloak:26.4.0
     container_name: keycloak-sso
     command: start-dev
     environment:
-      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN_USER}
-      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USER}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
       - KC_DB=postgres
       - KC_DB_URL_HOST=keycloak-db
-      - KC_DB_DATABASE=${KEYCLOAK_DB_NAME}
+      - KC_DB_URL_DATABASE=${KEYCLOAK_DB_NAME}
       - KC_DB_USERNAME=${KEYCLOAK_DB_USER}
       - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD}
+      # Allow running behind a reverse proxy (Traefik)
+      - KC_PROXY_ADDRESS_FORWARDING=true
+      - KC_HOSTNAME=sso.university.local
+      - KC_HTTP_ENABLED=true
     depends_on:
       - keycloak-db
     labels:
